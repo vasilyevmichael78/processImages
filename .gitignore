@@ -131,7 +131,9 @@ dist
 # python
 **/*.pyc
 **/__pycache__/
-
+**/.pytest_cache/
+**/venv/
+**/.venv/
 # db
 
 /backend/postgres_data
@@ -142,3 +144,4 @@ dist
 .vscode
 .idea
 node_modules
+/backend/uploads/*

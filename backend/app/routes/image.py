@@ -8,7 +8,7 @@ from app.services.image_service import save_image, apply_transformation
 from app.schemas import ImageUploadSchema, ImageResponseSchema, TransformationRequest
 import shutil
 import logging
-
+#
 router = APIRouter()
 
 def get_db():
@@ -17,6 +17,26 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def get_latest_version(db: Session, image_id: int):
+    versions = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.id.desc()).all()
+    latest_version = versions[0] if versions else None
+    if not latest_version:
+        logging.error(f"Image version not found: {image_id}")
+        raise HTTPException(status_code=404, detail="Image version not found")
+    return latest_version
+
+
+
+def serve_file(file_path: str, media_type: str):
+    if not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    def iterfile():
+        with open(file_path, mode="rb") as file:
+            yield from file
+
+    return StreamingResponse(iterfile(), media_type=media_type)
 
 @router.post("/upload", response_model=ImageResponseSchema)
 async def upload_image(request: Request, db: Session = Depends(get_db)):
@@ -86,27 +106,21 @@ async def edit_image(image_id: int, request: TransformationRequest, db: Session 
         logging.error(f"Invalid transformation: {request.transformation}")
         raise HTTPException(status_code=400, detail=f"Invalid transformation. Allowed transformations are: {', '.join(allowed_transformations)}")
 
-    image_version = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.created_at.desc()).first()
-    if not image_version:
-        logging.error(f"Image version not found: {image_id}")
-        raise HTTPException(status_code=404, detail="Image version not found")
+    latest_version = get_latest_version(db, image_id)
 
-    new_path, thumbnail_path, version_id = await apply_transformation(image_version.processed_path, request.transformation)
+    new_path, thumbnail_path, version_id = await apply_transformation(latest_version.processed_path, request.transformation)
 
     new_version = ImageVersion(image_id=image_id, version_id=version_id, processed_path=new_path, processed_thumbnail_path=thumbnail_path)
     db.add(new_version)
     db.commit()
 
     logging.info(f"Transformation applied: {image_id}, version: {version_id}")
-    return ImageResponseSchema(id=image_id, filename=image_version.image.filename, original=new_path, thumbnail=thumbnail_path)
+    return ImageResponseSchema(id=image_id, filename=new_version.image.filename, original=new_path, thumbnail=thumbnail_path)
 
 @router.get("/versions/{image_id}")
 async def get_versions(image_id: int, db: Session = Depends(get_db)):
-    versions = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).all()
-    latest_version = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.created_at.desc()).first()
-    if not latest_version:
-        logging.error(f"Image version not found: {image_id}")
-        raise HTTPException(status_code=404, detail="Image version not found")
+    versions = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.id.desc()).all()
+    latest_version = get_latest_version(db, image_id)
     return {
         "versions": [{"version_id": v.version_id, "path": v.processed_path, "thumbnail": v.processed_thumbnail_path} for v in versions],
         "latest_version": {
@@ -122,7 +136,7 @@ async def revert_version(image_id: int, version_id: str, db: Session = Depends(g
         logging.error(f"Version not found: {version_id}")
         raise HTTPException(status_code=404, detail="Version not found")
     
-    latest_version = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.created_at.desc()).first()
+    latest_version = get_latest_version(db, image_id)
     latest_version.processed_path = version.processed_path
     latest_version.processed_thumbnail_path = version.processed_thumbnail_path
     db.commit()
@@ -133,61 +147,21 @@ async def revert_version(image_id: int, version_id: str, db: Session = Depends(g
 @router.get("/serve/{image_id}")
 async def serve_image(image_id: int, db: Session = Depends(get_db)):
     image = get_image_or_404(db, image_id)
-
-    image_path = image.original_path
-    if not Path(image_path).exists():
-        raise HTTPException(status_code=404, detail="Image file not found")
-
-    def iterfile():
-        with open(image_path, mode="rb") as file:
-            yield from file
-
-    return StreamingResponse(iterfile(), media_type="image/jpeg")
+    return serve_file(image.original_path, "image/jpeg")
 
 @router.get("/serve/latest/{image_id}")
 async def serve_latest_image(image_id: int, db: Session = Depends(get_db)):
-    image_version = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.created_at.desc()).first()
-    if not image_version:
-        logging.error(f"Image version not found: {image_id}")
-        raise HTTPException(status_code=404, detail="Image version not found")
-
-    image_path = image_version.processed_path
-    if not Path(image_path).exists():
-        raise HTTPException(status_code=404, detail="Image file not found")
-
-    def iterfile():
-        with open(image_path, mode="rb") as file:
-            yield from file
-
-    return StreamingResponse(iterfile(), media_type="image/jpeg")
+    latest_version = get_latest_version(db, image_id)
+    return serve_file(latest_version.processed_path, "image/jpeg")
 
 @router.get("/serve/latest-thumbnail/{image_id}")
 async def serve_latest_thumbnail(image_id: int, db: Session = Depends(get_db)):
-    image_version = db.query(ImageVersion).filter(ImageVersion.image_id == image_id).order_by(ImageVersion.created_at.desc()).first()
-    if not image_version:
-        logging.error(f"Image version not found: {image_id}")
-        raise HTTPException(status_code=404, detail="Image version not found")
-
-    thumbnail_path = image_version.processed_thumbnail_path
-    if not Path(thumbnail_path).exists():
-        raise HTTPException(status_code=404, detail="Thumbnail file not found")
-
-    def iterfile():
-        with open(thumbnail_path, mode="rb") as file:
-            yield from file
-
-    return StreamingResponse(iterfile(), media_type="image/jpeg")
+    latest_version = get_latest_version(db, image_id)
+    return serve_file(latest_version.processed_thumbnail_path, "image/jpeg")
 
 @router.get("/serve-by-path/")
 async def serve_image_by_path(image_path: str = Query(...)):
-    if not Path(image_path).exists():
-        raise HTTPException(status_code=404, detail="Image file not found")
-
-    def iterfile():
-        with open(image_path, mode="rb") as file:
-            yield from file
-
-    return StreamingResponse(iterfile(), media_type="image/jpeg")
+    return serve_file(image_path, "image/jpeg")
 
 def get_image_or_404(db, image_id: int):
     image = db.query(Image).filter(Image.id == image_id).first()
