@@ -1,7 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+
+const showVersion = (version, versions) => {
+  if (!versions || !versions.latest_version || !versions.versions) return "";
+  if (version === versions.latest_version.version_id) return "Latest";
+  else if (
+    version === versions.versions[versions.versions.length - 1].version_id
+  )
+    return "Original";
+  else return version;
+};
 
 const fetchImageDetails = async (imageId) => {
   const { data } = await axios.get(`http://localhost:8000/images/${imageId}`);
@@ -59,7 +69,6 @@ const ImageDetails = () => {
   const mutation = useMutation({
     mutationFn: editImage,
     onSuccess: () => {
-      queryClient.invalidateQueries(["image", imageId]);
       queryClient.invalidateQueries(["versions", imageId]);
       setImageUrl(
         `http://localhost:8000/images/serve/latest/${imageId}?t=${new Date().getTime()}`
@@ -70,7 +79,6 @@ const ImageDetails = () => {
   const revertMutation = useMutation({
     mutationFn: revertVersion,
     onSuccess: () => {
-      queryClient.invalidateQueries(["image", imageId]);
       queryClient.invalidateQueries(["versions", imageId]);
       setImageUrl(
         `http://localhost:8000/images/serve/latest/${imageId}?t=${new Date().getTime()}`
@@ -102,7 +110,7 @@ const ImageDetails = () => {
         <img src={imageUrl} alt={image.filename} className="main-image" />
       </div>
       <p className="version-id">
-        Current Version ID: {versions[0]?.version_id}
+        Current Version ID: {versions?.latest_version?.version_id}
       </p>
       <form onSubmit={handleEdit} className="transformation-form">
         <label htmlFor="transformation" className="form-label">
@@ -126,19 +134,26 @@ const ImageDetails = () => {
       </form>
       <h2 className="sub-header">Image Versions</h2>
       <div className="versions-list">
-        {versions.map((version) => (
+        {versions?.versions?.map((version) => (
           <div key={version.version_id} className="version-item">
             <img
               src={`http://localhost:8000/images/serve-by-path/?image_path=${version.thumbnail}`}
               alt={`Version ${version.version_id}`}
               className="version-thumbnail"
             />
-            <button
-              onClick={() => handleRevert(version.version_id)}
-              className="btn-revert"
-            >
-              Revert to Version {version.version_id}
-            </button>
+            {version.version_id === versions?.latest_version?.version_id ? (
+              <span>Latest Verson</span>
+            ) : (
+              <button
+                onClick={() => handleRevert(version.version_id)}
+                className="btn-revert"
+              >
+                {`Revert to Version ${showVersion(
+                  version.version_id,
+                  versions
+                )}`}
+              </button>
+            )}
           </div>
         ))}
       </div>

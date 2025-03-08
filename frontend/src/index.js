@@ -5,6 +5,8 @@ import App from "./App";
 import reportWebVitals from "./reportWebVitals";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+console.log("Starting application...");
+
 const queryClient = new QueryClient();
 const container = document.getElementById("root");
 const root = createRoot(container);
@@ -16,5 +18,7 @@ root.render(
     </QueryClientProvider>
   </React.StrictMode>
 );
+
+console.log("Application started.");
 
 reportWebVitals();
