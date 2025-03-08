@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:13
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: image_db
+    volumes:
+      - ./backand/postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    container_name: fastapi_backend
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/image_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads # Only persist uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build: ./frontend
+    container_name: react_frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    command: serve -s build -l 3000 # Serve static React build
+
+volumes:
+  postgres_data:
